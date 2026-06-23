@@ -11,6 +11,8 @@ USER_EMAIL = os.getenv("EMAIL")
 SEARCH_QUERY = os.getenv("SEARCH_QUERY")
 MAX_ARTICLES = int(os.getenv("MAX_ARTICLES", 200))
 OUTPUT_FOLDER = os.getenv("OUTPUT_FOLDER", "output_files")
+mapping_env = os.getenv("MAPPING_SCHEME")
+MAPPING_SCHEME_DICT = json.loads(mapping_env) if mapping_env else {}
 
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
@@ -71,39 +73,24 @@ def fetch_openalex_articles(search_query, email, max_articles=100):
         time.sleep(0.5)
     return collected_articles
 
-def classify_by_keywords(abstract):
-    abstract_lower = str(abstract).lower()
-    mapping_scheme = {
-        'mbt': [
-            'model-based testing', 'mbt', 'model based', 'formal specification', 
-            'state machine', 'uml', 'finite state'
-        ],
-        'obm': [
-            'observation-based', 'obm', 'model inference', 'model learning', 
-            'execution trace', 'log analysis', 'dynamic analysis', 'reverse engineering'
-        ],
-        'testes': [
-            'test generation', 'test automation', 'test case', 'test suite', 
-            'test oracle', 'coverage', 'test execution'
-        ],
-        'estudos de caso': [
-            'case study', 'empirical evaluation', 'gui testing', 
-            'web application', 'industrial application', 'experiment'
-        ]
-    }
-    for category, keywords in mapping_scheme.items():
-        if any(kw in abstract_lower for kw in keywords):
+def classify_by_keywords(row):
+    text_to_search = f"{str(row['Title'])} {str(row['Abstract'])}".lower()
+    for category, keywords in MAPPING_SCHEME_DICT.items():
+        if any(kw in text_to_search for kw in keywords):
             return category
+            
     return 'Geral/Outros'
 
 def process_and_classify(data):
     df = pd.DataFrame(data)
     if df.empty:
         return df
-    df = df[df['Abstract'] != 'Abstract not available']
-    df = df.dropna(subset=['Abstract', 'Year'])
+        
+    df = df.dropna(subset=['Year'])
     df['Year'] = df['Year'].astype(int)
-    df['Category'] = df['Abstract'].apply(classify_by_keywords)
+    
+    df['Category'] = df.apply(classify_by_keywords, axis=1)
+    
     df = df.sort_values(by=['Category', 'Year', 'Title'], ascending=[True, False, True])
     colunas_finais = ['Title', 'Year', 'Category', 'Authors', 'DOI', 'Abstract']
     return df[colunas_finais]
