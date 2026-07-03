@@ -44,10 +44,8 @@ def fetch_openalex_articles(search_query, email, max_articles=100):
             break
         data = response.json()
         results = data.get("results", [])
-        
         if not results:
             break
-        
         for item in results:
             if len(collected_articles) >= max_articles:
                 break
@@ -78,19 +76,15 @@ def classify_by_keywords(row):
     for category, keywords in MAPPING_SCHEME_DICT.items():
         if any(kw in text_to_search for kw in keywords):
             return category
-            
     return 'Geral/Outros'
 
 def process_and_classify(data):
     df = pd.DataFrame(data)
     if df.empty:
         return df
-        
     df = df.dropna(subset=['Year'])
     df['Year'] = df['Year'].astype(int)
-    
     df['Category'] = df.apply(classify_by_keywords, axis=1)
-    
     df = df.sort_values(by=['Category', 'Year', 'Title'], ascending=[True, False, True])
     colunas_finais = ['Title', 'Year', 'Category', 'Authors', 'DOI', 'Abstract']
     return df[colunas_finais]
@@ -98,7 +92,6 @@ def process_and_classify(data):
 if __name__ == "__main__":
     json_raw_path = os.path.join(OUTPUT_FOLDER, '01_systematic_review_articles.json')
     json_classified_path = os.path.join(OUTPUT_FOLDER, '02_classified_articles.json')
-    
     if os.path.exists(json_raw_path):
         with open(json_raw_path, 'r', encoding='utf-8') as f:
             raw_data = json.load(f)
@@ -107,7 +100,6 @@ if __name__ == "__main__":
         if raw_data:
             with open(json_raw_path, 'w', encoding='utf-8') as json_file:
                 json.dump(raw_data, json_file, indent=4, ensure_ascii=False)
-    
     if raw_data:
         df_classified = process_and_classify(raw_data)
         if not df_classified.empty:

@@ -2,6 +2,7 @@ import os
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from wordcloud import WordCloud, STOPWORDS
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -18,13 +19,13 @@ def load_data():
 def get_custom_palette(categories):
     palette = {}
     for cat in categories:
-        if cat == 'mbt':
+        if cat == 'arquiteturas_e_modelos':
             palette[cat] = '#e63946'         
-        elif cat == 'obm':
+        elif cat == 'edge_e_tempo_real':
             palette[cat] = '#457b9d'        
-        elif cat == 'testes':
+        elif cat == 'sintese_e_datasets':
             palette[cat] = '#2a9d8f'       
-        elif cat == 'estudos de caso':
+        elif cat == 'aplicacao_industrial':
             palette[cat] = '#e9c46a'         
         else:
             palette[cat] = '#d3d3d3'       
@@ -35,7 +36,7 @@ def plot_articles_by_category(df):
     category_order = df['Category'].value_counts().index
     palette = get_custom_palette(category_order)
     sns.countplot(data=df, y='Category', order=category_order, palette=palette)
-    plt.title('Artigos por Categoria (Revisão MBT)', fontsize=14, fontweight='bold', pad=15)
+    plt.title('Artigos por Categoria (Controle de Qualidade com IA)', fontsize=14, fontweight='bold', pad=15)
     plt.xlabel('Número de Artigos', fontsize=12)
     plt.ylabel('Categoria', fontsize=12)
     sns.despine()
@@ -65,7 +66,7 @@ def plot_category_trends_over_time(df):
     sns.lineplot(data=trend_data, x='Year', y='Count', hue='Category', 
                  linewidth=3, marker='o', markersize=8, palette=palette)
     
-    plt.title('Tendências das Áreas de Pesquisa (MBT e Análise Dinâmica)', fontsize=16, fontweight='bold', pad=20)
+    plt.title('Tendências das áreas de pesquisa', fontsize=16, fontweight='bold', pad=20)
     plt.xlabel('Ano de Publicação', fontsize=12)
     plt.ylabel('Quantidade de Artigos', fontsize=12)
     plt.legend(title='Categorias', bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -79,7 +80,7 @@ def plot_category_distribution(df):
     category_counts = df['Category'].value_counts()
     palette = [get_custom_palette([cat])[cat] for cat in category_counts.index]
     plt.pie(category_counts, labels=category_counts.index, autopct='%1.1f%%', startangle=140, colors=palette)
-    plt.title('Distribuição Percentual de Artigos', fontsize=14, fontweight='bold', pad=15)
+    plt.title('Distribuição de Artigos', fontsize=14, fontweight='bold', pad=15)
     plt.tight_layout()
     plt.savefig(os.path.join(OUTPUT_FOLDER, 'chart_04_category_distribution.png'), dpi=300)
     plt.close()
@@ -90,7 +91,7 @@ def plot_top_authors(df, top_n=10):
     all_authors = all_authors[all_authors.str.strip() != ""]
     top_authors = all_authors.value_counts().head(top_n)
     sns.barplot(x=top_authors.values, y=top_authors.index, color="#457b9d")
-    plt.title(f'Top {top_n} Autores Mais Publicados na Área', fontsize=14, fontweight='bold', pad=15)
+    plt.title(f'Top {top_n} Autores Mais Publicados', fontsize=14, fontweight='bold', pad=15)
     plt.xlabel('Número de Artigos', fontsize=12)
     plt.ylabel('Autor', fontsize=12)
     sns.despine()
@@ -104,17 +105,64 @@ def plot_market_share_area(df):
     crosstab_perc = crosstab.div(crosstab.sum(axis=1), axis=0) * 100
     categories = crosstab.columns
     colors = [get_custom_palette([cat])[cat] for cat in categories]
-    
     crosstab_perc.plot(kind='area', stacked=True, color=colors, alpha=0.85, figsize=(14, 7))
-
-    plt.title('Distribuição Académica (Market Share)', fontsize=16, fontweight='bold', pad=20)
+    plt.title('Distribuição Acadêmica', fontsize=16, fontweight='bold', pad=20)
     plt.xlabel('Ano de Publicação', fontsize=12)
-    plt.ylabel('Percentagem do Total de Publicações (%)', fontsize=12)
+    plt.ylabel('Total de Publicações (%)', fontsize=12)
     plt.legend(title='Categorias', bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.margins(x=0, y=0)
     sns.despine()
     plt.tight_layout()
     plt.savefig(os.path.join(OUTPUT_FOLDER, 'chart_07_market_share.png'), dpi=300)
+    plt.close()
+
+def plot_wordcloud(df):
+    plt.figure(figsize=(12, 6))
+    text = " ".join(title for title in df['Title'].dropna())
+    stopwords = set(STOPWORDS)
+    stopwords.update(["based", "model", "testing", "software", "system", "approach", "using", "method"])
+    
+    wordcloud = WordCloud(width=800, height=400, background_color="white", 
+                          colormap="viridis", stopwords=stopwords).generate(text)
+    plt.imshow(wordcloud, interpolation='bilinear')
+    plt.axis("off")
+    plt.title('Termos Mais Frequentes nos Títulos', fontsize=16, fontweight='bold', pad=20)
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_FOLDER, 'chart_08_wordcloud.png'), dpi=300)
+    plt.close()
+
+def plot_author_activity_heatmap(df, top_n=10):
+    plt.figure(figsize=(12, 8))
+    df_authors = df.copy()
+    df_authors['Author'] = df_authors['Authors'].str.split('; ')
+    df_authors = df_authors.explode('Author').dropna(subset=['Author'])
+    df_authors = df_authors[df_authors['Author'].str.strip() != ""]
+    top_authors_list = df_authors['Author'].value_counts().head(top_n).index
+    df_top = df_authors[df_authors['Author'].isin(top_authors_list)]
+    activity_matrix = pd.crosstab(df_top['Author'], df_top['Year'])
+    sns.heatmap(activity_matrix, cmap="YlGnBu", annot=True, fmt="d", linewidths=.5)
+    plt.title('Atividade dos Top Autores ao Longo do Tempo', fontsize=14, fontweight='bold', pad=15)
+    plt.xlabel('Ano de Publicação', fontsize=12)
+    plt.ylabel('Autor', fontsize=12)
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_FOLDER, 'chart_09_author_heatmap.png'), dpi=300)
+    plt.close()
+
+def plot_cumulative_growth_by_category(df):
+    plt.figure(figsize=(14, 7))
+    trend_data = df.groupby(['Year', 'Category']).size().unstack(fill_value=0)
+    cumulative_data = trend_data.cumsum()
+    cumulative_long = cumulative_data.reset_index().melt(id_vars='Year', var_name='Category', value_name='Cumulative Count')
+    palette = get_custom_palette(cumulative_long['Category'].unique())
+    sns.lineplot(data=cumulative_long, x='Year', y='Cumulative Count', hue='Category', 
+                 linewidth=3, palette=palette)
+    plt.title('Crescimento Acumulado de Publicações por Categoria', fontsize=16, fontweight='bold', pad=20)
+    plt.xlabel('Ano de Publicação', fontsize=12)
+    plt.ylabel('Total Acumulado de Artigos', fontsize=12)
+    plt.legend(title='Categorias', bbox_to_anchor=(1.05, 1), loc='upper left')
+    sns.despine()
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_FOLDER, 'chart_10_cumulative_category.png'), dpi=300)
     plt.close()
 
 if __name__ == "__main__":
@@ -127,3 +175,6 @@ if __name__ == "__main__":
         plot_category_distribution(df_articles)
         plot_top_authors(df_articles)
         plot_market_share_area(df_articles)
+        plot_wordcloud(df_articles)
+        plot_author_activity_heatmap(df_articles)
+        plot_cumulative_growth_by_category(df_articles)
