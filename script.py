@@ -9,7 +9,7 @@ load_dotenv()
 
 USER_EMAIL = os.getenv("EMAIL")
 SEARCH_QUERY = os.getenv("SEARCH_QUERY")
-MAX_ARTICLES = int(os.getenv("MAX_ARTICLES", 200))
+MAX_ARTICLES = int(os.getenv("MAX_ARTICLES", 10000))
 OUTPUT_FOLDER = os.getenv("OUTPUT_FOLDER", "output_files")
 mapping_env = os.getenv("MAPPING_SCHEME")
 MAPPING_SCHEME_DICT = json.loads(mapping_env) if mapping_env else {}
@@ -29,11 +29,11 @@ def reconstruct_abstract(inverted_index):
     except Exception as e:
         return f"error {e}"
 
-def fetch_openalex_articles(search_query, email, max_articles=100):
+def fetch_openalex_articles(search_query, email, max_articles=10000):
     headers = {"User-Agent": f"mailto:{email}"}
     base_url = "https://api.openalex.org/works"
     params = {
-        "search": search_query,
+        "filter": f"title_and_abstract.search:{search_query}",
         "per-page": 50,
         "cursor": "*"
     }
@@ -41,11 +41,11 @@ def fetch_openalex_articles(search_query, email, max_articles=100):
     while len(collected_articles) < max_articles:
         response = requests.get(base_url, headers=headers, params=params)
         if response.status_code != 200:
-            break
+            print(f"erro {response.status_code}")
+            print(f"detalhes: {response.text}")
+            break       
         data = response.json()
-        results = data.get("results", [])
-        if not results:
-            break
+        results = data.get("results", []) 
         for item in results:
             if len(collected_articles) >= max_articles:
                 break
@@ -63,12 +63,12 @@ def fetch_openalex_articles(search_query, email, max_articles=100):
                 "Year": year,
                 "DOI": doi,
                 "Abstract": abstract_text
-            })
+            })     
         next_cursor = data.get("meta", {}).get("next_cursor")
         if not next_cursor:
             break 
         params["cursor"] = next_cursor
-        time.sleep(0.5)
+        time.sleep(0.5)     
     return collected_articles
 
 def classify_by_keywords(row):
@@ -99,7 +99,7 @@ if __name__ == "__main__":
         raw_data = fetch_openalex_articles(SEARCH_QUERY, USER_EMAIL, MAX_ARTICLES) 
         if raw_data:
             with open(json_raw_path, 'w', encoding='utf-8') as json_file:
-                json.dump(raw_data, json_file, indent=4, ensure_ascii=False)
+                json.dump(raw_data, json_file, indent=4, ensure_ascii=False)          
     if raw_data:
         df_classified = process_and_classify(raw_data)
         if not df_classified.empty:

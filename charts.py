@@ -19,14 +19,12 @@ def load_data():
 def get_custom_palette(categories):
     palette = {}
     for cat in categories:
-        if cat == 'arquiteturas_e_modelos':
+        if cat == 'inferencia_e_modelagem':
             palette[cat] = '#e63946'         
-        elif cat == 'edge_e_tempo_real':
+        elif cat == 'testes_e_verificacao':
             palette[cat] = '#457b9d'        
-        elif cat == 'sintese_e_datasets':
+        elif cat == 'sistemas_e_dominios':
             palette[cat] = '#2a9d8f'       
-        elif cat == 'aplicacao_industrial':
-            palette[cat] = '#e9c46a'         
         else:
             palette[cat] = '#d3d3d3'       
     return palette
@@ -35,8 +33,8 @@ def plot_articles_by_category(df):
     plt.figure(figsize=(10, 6))
     category_order = df['Category'].value_counts().index
     palette = get_custom_palette(category_order)
-    sns.countplot(data=df, y='Category', order=category_order, palette=palette)
-    plt.title('Artigos por Categoria (Controle de Qualidade com IA)', fontsize=14, fontweight='bold', pad=15)
+    sns.countplot(data=df, y='Category', order=category_order, palette=palette, hue='Category', legend=False)
+    plt.title('Artigos por Categoria (Testes e Sistemas Distribuídos)', fontsize=14, fontweight='bold', pad=15)
     plt.xlabel('Número de Artigos', fontsize=12)
     plt.ylabel('Categoria', fontsize=12)
     sns.despine()
@@ -61,11 +59,9 @@ def plot_articles_by_year(df):
 def plot_category_trends_over_time(df):
     plt.figure(figsize=(14, 7))
     trend_data = df.groupby(['Year', 'Category']).size().reset_index(name='Count')
-    palette = get_custom_palette(trend_data['Category'].unique())
-    
+    palette = get_custom_palette(trend_data['Category'].unique()) 
     sns.lineplot(data=trend_data, x='Year', y='Count', hue='Category', 
                  linewidth=3, marker='o', markersize=8, palette=palette)
-    
     plt.title('Tendências das áreas de pesquisa', fontsize=16, fontweight='bold', pad=20)
     plt.xlabel('Ano de Publicação', fontsize=12)
     plt.ylabel('Quantidade de Artigos', fontsize=12)
@@ -121,7 +117,6 @@ def plot_wordcloud(df):
     text = " ".join(title for title in df['Title'].dropna())
     stopwords = set(STOPWORDS)
     stopwords.update(["based", "model", "testing", "software", "system", "approach", "using", "method"])
-    
     wordcloud = WordCloud(width=800, height=400, background_color="white", 
                           colormap="viridis", stopwords=stopwords).generate(text)
     plt.imshow(wordcloud, interpolation='bilinear')
@@ -135,7 +130,7 @@ def plot_author_activity_heatmap(df, top_n=10):
     plt.figure(figsize=(12, 8))
     df_authors = df.copy()
     df_authors['Author'] = df_authors['Authors'].str.split('; ')
-    df_authors = df_authors.explode('Author').dropna(subset=['Author'])
+    df_authors = df_authors.explode('Author').dropna(subset=['Author']).reset_index(drop=True)
     df_authors = df_authors[df_authors['Author'].str.strip() != ""]
     top_authors_list = df_authors['Author'].value_counts().head(top_n).index
     df_top = df_authors[df_authors['Author'].isin(top_authors_list)]
