@@ -1,0 +1,22 @@
+@startuml
+
+start
+:Implementar systema de screening usando LLM locais;
+:Buscar os artigos ano de publicacao maiores que 2020;
+:Buscar informações sobre abstracts em bases de dados;
+:filtrar os artigos que não passaram por pair review;
+:filtrar os artigos que não são em ingles;
+:Executar processo de screening;
+if (artigo atende aos critérios de seleção ?) then (yes)
+  :computar artigos na lista de aprovados;
+elseif (artigo nao selecionado por empate?) then (yes)
+  :fazer a avaliação individual do artigo;
+  :decidir se artigo atende aos critérios;
+  :adicionar artigo ao grupo adequadao de classificação;
+else
+  :computar artigo na lista dos excluidos;
+endif
+:Plotar resultados;
+stop
+
+@enduml
