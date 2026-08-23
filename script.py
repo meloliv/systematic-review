@@ -12,6 +12,8 @@ load_dotenv()
 USER_EMAIL = os.getenv("EMAIL")
 OPENALEX_API_KEY = os.getenv("OPENALEX_API_KEY")
 SEARCH_QUERY = os.getenv("SEARCH_QUERY")
+YEAR_FROM = os.getenv("YEAR_FROM") 
+YEAR_TO = os.getenv("YEAR_TO")     
 MAX_ARTICLES = int(os.getenv("MAX_ARTICLES", 10000))
 OUTPUT_FOLDER = os.getenv("OUTPUT_FOLDER", "output_files")
 mapping_env = os.getenv("MAPPING_SCHEME")
@@ -55,8 +57,8 @@ def reconstruct_abstract(inverted_index):
 
 
 def fetch_all_sources(search_query, email, max_articles=10000):
-    articles = fetch_openalex_articles(search_query, email, max_articles, OPENALEX_API_KEY)
-    articles += fetch_crossref_articles(search_query, email, max_articles)
+    articles = fetch_openalex_articles(search_query, email, max_articles, OPENALEX_API_KEY, YEAR_FROM, YEAR_TO)
+    articles += fetch_crossref_articles(search_query, email, max_articles, YEAR_FROM, YEAR_TO)
     return dedup_by_doi(articles)
 
 
@@ -85,11 +87,16 @@ def process_and_classify(data):
     return df[colunas_finais]
 
 
-def fetch_openalex_articles(search_query, email, max_articles=10000, api_key=None):
+def fetch_openalex_articles(search_query, email, max_articles=10000, api_key=None, year_from=None, year_to=None):
     headers = {"User-Agent": f"mailto:{email}"}
     base_url = "https://api.openalex.org/works"
+    filter_parts = [f"title_and_abstract.search:{search_query}"]
+    if year_from:
+        filter_parts.append(f"from_publication_date:{year_from}-01-01")
+    if year_to:
+        filter_parts.append(f"to_publication_date:{year_to}-12-31")
     params = {
-        "filter": f"title_and_abstract.search:{search_query}",
+        "filter": ",".join(filter_parts),
         "per-page": 50,
         "cursor": "*"
     }
@@ -132,12 +139,18 @@ def fetch_openalex_articles(search_query, email, max_articles=10000, api_key=Non
     return collected_articles
 
 
-def fetch_crossref_articles(search_query, email, max_articles=10000):
+def fetch_crossref_articles(search_query, email, max_articles=10000, year_from=None, year_to=None):
     base_url = "https://api.crossref.org/works"
     rows = 100
     offset = 0
     collected_articles = []
     query_terms = [t.lower() for t in search_query.replace('"', "").split() if len(t) > 2]
+
+    filter_parts = []
+    if year_from:
+        filter_parts.append(f"from-pub-date:{year_from}-01-01")
+    if year_to:
+        filter_parts.append(f"until-pub-date:{year_to}-12-31")
 
     while len(collected_articles) < max_articles:
         params = {
@@ -146,6 +159,8 @@ def fetch_crossref_articles(search_query, email, max_articles=10000):
             "offset": offset,
             "mailto": email,
         }
+        if filter_parts:
+            params["filter"] = ",".join(filter_parts)
         response = _get(base_url, params=params)
         if response.status_code != 200:
             print(f"erro crossref {response.status_code}")
