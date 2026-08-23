@@ -18,3 +18,4 @@ seaborn==0.13.2
 six==1.17.0
 urllib3==2.7.0
 wordcloud==1.9.6
+tenacity

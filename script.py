@@ -1,13 +1,16 @@
 import os
+import re
 import requests
 import json
 import time
 import pandas as pd
 from dotenv import load_dotenv
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 load_dotenv()
 
 USER_EMAIL = os.getenv("EMAIL")
+OPENALEX_API_KEY = os.getenv("OPENALEX_API_KEY")
 SEARCH_QUERY = os.getenv("SEARCH_QUERY")
 MAX_ARTICLES = int(os.getenv("MAX_ARTICLES", 10000))
 OUTPUT_FOLDER = os.getenv("OUTPUT_FOLDER", "output_files")
@@ -15,6 +18,27 @@ mapping_env = os.getenv("MAPPING_SCHEME")
 MAPPING_SCHEME_DICT = json.loads(mapping_env) if mapping_env else {}
 
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+
+DASH_VARIANTS = re.compile(r"[\u2010\u2011\u2012\u2013\u2014\u2212]")
+MULTI_SEP = re.compile(r"[-\s]+")
+
+RETRYABLE_EXCEPTIONS = (
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+    requests.exceptions.ChunkedEncodingError,
+)
+retry_network = retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=2, max=30),
+    retry=retry_if_exception_type(RETRYABLE_EXCEPTIONS),
+    reraise=True,
+)
+
+
+@retry_network
+def _get(url, headers=None, params=None, timeout=30):
+    return requests.get(url, headers=headers, params=params, timeout=timeout)
+
 
 def reconstruct_abstract(inverted_index):
     if not inverted_index:
@@ -29,7 +53,39 @@ def reconstruct_abstract(inverted_index):
     except Exception as e:
         return f"error {e}"
 
-def fetch_openalex_articles(search_query, email, max_articles=10000):
+
+def fetch_all_sources(search_query, email, max_articles=10000):
+    articles = fetch_openalex_articles(search_query, email, max_articles, OPENALEX_API_KEY)
+    articles += fetch_crossref_articles(search_query, email, max_articles)
+    return dedup_by_doi(articles)
+
+
+def _normalize(text):
+    return MULTI_SEP.sub(" ", DASH_VARIANTS.sub("-", text).lower()).strip()
+
+
+def classify_by_keywords(row):
+    text_to_search = _normalize(f"{row['Title']} {row['Abstract']}")
+    for category, keywords in MAPPING_SCHEME_DICT.items():
+        if any(_normalize(kw) in text_to_search for kw in keywords):
+            return category
+    return 'Geral/Outros'
+
+
+def process_and_classify(data):
+    df = pd.DataFrame(data)
+    if df.empty:
+        return df
+    df['Year'] = pd.to_numeric(df['Year'], errors='coerce')  # "No year" e afins viram NaN
+    df = df.dropna(subset=['Year'])
+    df['Year'] = df['Year'].astype(int)
+    df['Category'] = df.apply(classify_by_keywords, axis=1)
+    df = df.sort_values(by=['Category', 'Year', 'Title'], ascending=[True, False, True])
+    colunas_finais = ['Title', 'Year', 'Category', 'Authors', 'DOI', 'Abstract', 'Source']
+    return df[colunas_finais]
+
+
+def fetch_openalex_articles(search_query, email, max_articles=10000, api_key=None):
     headers = {"User-Agent": f"mailto:{email}"}
     base_url = "https://api.openalex.org/works"
     params = {
@@ -37,15 +93,17 @@ def fetch_openalex_articles(search_query, email, max_articles=10000):
         "per-page": 50,
         "cursor": "*"
     }
+    if api_key:
+        params["api_key"] = api_key
     collected_articles = []
     while len(collected_articles) < max_articles:
-        response = requests.get(base_url, headers=headers, params=params)
+        response = _get(base_url, headers=headers, params=params)
         if response.status_code != 200:
-            print(f"erro {response.status_code}")
+            print(f"erro openalex {response.status_code}")
             print(f"detalhes: {response.text}")
-            break       
+            break
         data = response.json()
-        results = data.get("results", []) 
+        results = data.get("results", [])
         for item in results:
             if len(collected_articles) >= max_articles:
                 break
@@ -62,32 +120,87 @@ def fetch_openalex_articles(search_query, email, max_articles=10000):
                 "Authors": formatted_authors,
                 "Year": year,
                 "DOI": doi,
-                "Abstract": abstract_text
-            })     
+                "Abstract": abstract_text,
+                "Source": "openalex"
+            })
         next_cursor = data.get("meta", {}).get("next_cursor")
         if not next_cursor:
-            break 
+            break
         params["cursor"] = next_cursor
-        time.sleep(0.5)     
+        time.sleep(0.5)
+    print(f"openalex: {len(collected_articles)} artigos")
     return collected_articles
 
-def classify_by_keywords(row):
-    text_to_search = f"{str(row['Title'])} {str(row['Abstract'])}".lower()
-    for category, keywords in MAPPING_SCHEME_DICT.items():
-        if any(kw in text_to_search for kw in keywords):
-            return category
-    return 'Geral/Outros'
 
-def process_and_classify(data):
-    df = pd.DataFrame(data)
-    if df.empty:
-        return df
-    df = df.dropna(subset=['Year'])
-    df['Year'] = df['Year'].astype(int)
-    df['Category'] = df.apply(classify_by_keywords, axis=1)
-    df = df.sort_values(by=['Category', 'Year', 'Title'], ascending=[True, False, True])
-    colunas_finais = ['Title', 'Year', 'Category', 'Authors', 'DOI', 'Abstract']
-    return df[colunas_finais]
+def fetch_crossref_articles(search_query, email, max_articles=10000):
+    base_url = "https://api.crossref.org/works"
+    rows = 100
+    offset = 0
+    collected_articles = []
+    query_terms = [t.lower() for t in search_query.replace('"', "").split() if len(t) > 2]
+
+    while len(collected_articles) < max_articles:
+        params = {
+            "query.bibliographic": search_query,
+            "rows": rows,
+            "offset": offset,
+            "mailto": email,
+        }
+        response = _get(base_url, params=params)
+        if response.status_code != 200:
+            print(f"erro crossref {response.status_code}")
+            print(f"detalhes: {response.text}")
+            break
+        data = response.json()
+        items = data.get("message", {}).get("items", [])
+        if not items:
+            break
+        for item in items:
+            if len(collected_articles) >= max_articles:
+                break
+            title_list = item.get("title") or []
+            title = title_list[0] if title_list else "No title"
+            abstract = item.get("abstract", "Abstract not available")
+            text_to_check = f"{title} {abstract}".lower()
+            if query_terms and not any(term in text_to_check for term in query_terms):
+                continue
+            authors_list = item.get("author", [])
+            author_names = [
+                f"{a.get('given', '')} {a.get('family', '')}".strip() for a in authors_list
+            ]
+            formatted_authors = "; ".join(author_names)
+            year = (item.get("published") or {}).get("date-parts", [[None]])[0][0] or "No year"
+            collected_articles.append({
+                "Title": title,
+                "Authors": formatted_authors,
+                "Year": year,
+                "DOI": item.get("DOI", "No DOI"),
+                "Abstract": abstract,
+                "Source": "crossref"
+            })
+        offset += rows
+        if offset >= data.get("message", {}).get("total-results", 0):
+            break
+        time.sleep(0.5)
+    print(f"crossref: {len(collected_articles)} artigos")
+    return collected_articles
+
+
+def dedup_by_doi(articles):
+    seen = {}
+    no_doi = []
+    for art in articles:
+        doi = art.get("DOI")
+        if doi and doi != "No DOI":
+            key = doi.lower().strip()
+            if key not in seen:
+                seen[key] = art
+        else:
+            no_doi.append(art)
+    result = list(seen.values()) + no_doi
+    print(f"dedup: {len(articles)} -> {len(result)} (removidos {len(articles) - len(result)} duplicados por doi)")
+    return result
+
 
 if __name__ == "__main__":
     json_raw_path = os.path.join(OUTPUT_FOLDER, '01_systematic_review_articles.json')
@@ -96,10 +209,10 @@ if __name__ == "__main__":
         with open(json_raw_path, 'r', encoding='utf-8') as f:
             raw_data = json.load(f)
     else:
-        raw_data = fetch_openalex_articles(SEARCH_QUERY, USER_EMAIL, MAX_ARTICLES) 
+        raw_data = fetch_all_sources(SEARCH_QUERY, USER_EMAIL, MAX_ARTICLES)
         if raw_data:
             with open(json_raw_path, 'w', encoding='utf-8') as json_file:
-                json.dump(raw_data, json_file, indent=4, ensure_ascii=False)          
+                json.dump(raw_data, json_file, indent=4, ensure_ascii=False)
     if raw_data:
         df_classified = process_and_classify(raw_data)
         if not df_classified.empty:
